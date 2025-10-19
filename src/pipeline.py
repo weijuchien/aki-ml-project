@@ -21,8 +21,16 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.over_sampling import SMOTE
-from sklearn.metrics import f1_score, roc_auc_score, average_precision_score
+from sklearn.metrics import (
+    f1_score, roc_auc_score, average_precision_score,
+    precision_score, recall_score, brier_score_loss
+)
 import argparse
+
+# ============================================================
+# Constants
+# ============================================================
+EVALUATION_METRICS = ['precision', 'recall', 'f1', 'roc_auc', 'auprc', 'brier_score']
 
 
 # ============================================================
@@ -165,7 +173,7 @@ def process_single_stay(stay_id, df, observation_hours, label_col):
     return X_one, y_one, group_one
 
 
-def parallel_feature_engineering(df, observation_hours=6, label_col="aki_label", n_jobs=-1):
+def parallel_feature_engineering(df, observation_hours=6, label_col="aki_label", n_jobs=4):
     stay_groups = [(stay_id, g.copy()) for stay_id, g in df.groupby("stay_id")]
 
     # Use joblib for better multiprocessing support
@@ -244,7 +252,7 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
         param_grid=param_grid,
         cv=inner_cv,
         scoring='f1',
-        n_jobs=-1,
+        n_jobs=4,
         verbose=0
     )
 
@@ -259,18 +267,24 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
 
     results = {
         "fold": fold_idx + 1,
+        "precision": precision_score(y_test, y_pred),
+        "recall": recall_score(y_test, y_pred),
         "f1": f1_score(y_test, y_pred),
         "roc_auc": roc_auc_score(y_test, y_prob),
         "auprc": average_precision_score(y_test, y_prob),
+        "brier_score": brier_score_loss(y_test, y_prob),
         "train_size": len(y_train),
         "test_size": len(y_test),
         "test_prevalence": y_test.mean()
     }
 
     print(f"\nFold {fold_idx + 1} Results:")
+    print(f"  Precision: {results['precision']:.3f}")
+    print(f"  Recall: {results['recall']:.3f}")
     print(f"  F1: {results['f1']:.3f}")
     print(f"  ROC-AUC: {results['roc_auc']:.3f}")
     print(f"  AUPRC: {results['auprc']:.3f}")
+    print(f"  Brier Score: {results['brier_score']:.3f}")
 
     # Clean up memory
     del X_train, y_train, X_test, y_test
@@ -301,7 +315,7 @@ def run_nested_cv_with_gridsearch(df_raw, model_type, outer_splits=10, inner_spl
     print(f"[2/4] Starting Nested CV with {outer_splits} folds...")
 
     # Use threading backend to avoid pickle issues
-    with tqdm_joblib(tqdm(desc="Outer Folds Progress", total=len(folds))) as progress_bar:
+    with tqdm_joblib(tqdm(desc="Outer Folds Progress", total=len(folds))):
         all_results = Parallel(n_jobs=4, backend="threading")(
             delayed(process_fold)(
                 df_raw, train_stays, test_stays, fold_idx,
@@ -318,7 +332,7 @@ def run_nested_cv_with_gridsearch(df_raw, model_type, outer_splits=10, inner_spl
     print("="*60)
 
     results_df = pd.DataFrame(all_results)
-    for metric in ['f1', 'roc_auc', 'auprc']:
+    for metric in EVALUATION_METRICS:
         mean_val = results_df[metric].mean()
         std_val = results_df[metric].std()
         print(f"{metric.upper()}: {mean_val:.3f} ± {std_val:.3f}")
@@ -331,15 +345,45 @@ def run_nested_cv_with_gridsearch(df_raw, model_type, outer_splits=10, inner_spl
 # ============================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Nested CV AKI Prediction Pipeline")
-    parser.add_argument("-d", "--data", type=str, default="../data/final_cohort.csv", help="Path to input CSV file (merged ICU data)")
-    parser.add_argument("-m", "--model", type=str, choices=["lr", "rf"], default="lr", help="Model type")
+    parser.add_argument(
+        "-d", "--data", type=str, default="../data/final_cohort.csv",
+        help="Path to input CSV file (merged ICU data)"
+    )
     args = parser.parse_args()
 
     df = pd.read_csv(args.data, parse_dates=["intime", "outtime", "charttime"])
-    results_df = run_nested_cv_with_gridsearch(df, args.model)
+
+    # Run both models
+    all_results = []
+
+    for model_type in ["lr", "rf"]:
+        print(f"\n{'='*80}")
+        print(f"Running {model_type.upper()} Model")
+        print(f"{'='*80}")
+
+        results_df = run_nested_cv_with_gridsearch(df, model_type)
+        results_df["model"] = model_type  # Add model type column
+        all_results.append(results_df)
+
+    # Combine results from both models
+    combined_results = pd.concat(all_results, ignore_index=True)
 
     # Create results directory if it doesn't exist
     os.makedirs("../results", exist_ok=True)
-    results_df.to_csv("../results/nested_cv_results.csv", index=False)
+    result_file = "nested_cv_results.csv"
+    combined_results.to_csv(f"../results/{result_file}", index=False)
 
-    print("\n✅ Saved results to nested_cv_results.csv")
+    print(f"\n============== Saved results to {result_file} ==============")
+    print(f"Total folds: {len(combined_results)} ({len(combined_results[combined_results['model']=='lr'])} LR + {len(combined_results[combined_results['model']=='rf'])} RF)")  # noqa: E501
+
+    # Print summary by model
+    print("\n" + "-"*60)
+    print("SUMMARY BY MODEL")
+    print("-"*60)
+    for model in ["lr", "rf"]:
+        model_results = combined_results[combined_results["model"] == model]
+        print(f"\n{model.upper()} Model:")
+        for metric in EVALUATION_METRICS:
+            mean_val = model_results[metric].mean()
+            std_val = model_results[metric].std()
+            print(f"  {metric.upper()}: {mean_val:.3f} ± {std_val:.3f}")
