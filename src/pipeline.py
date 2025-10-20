@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
 
-"""
-AKI Prediction Nested CV Runner
-Author: Vita
-Description: Run nested cross-validation with parallel feature engineering and model tuning
-"""
-
 import os
 import gc
 import numpy as np
@@ -25,11 +19,13 @@ from sklearn.metrics import (
     precision_score, recall_score, brier_score_loss
 )
 import argparse
+import json
 
 # ============================================================
 # Constants
 # ============================================================
 EVALUATION_METRICS = ['precision', 'recall', 'f1', 'roc_auc', 'auprc', 'brier_score']
+LR_MAX_ITER = 1000
 
 
 # ============================================================
@@ -75,8 +71,7 @@ def feature_engineering(df, observation_hours=6, label_col="aki_label"):
             continue
 
         feat = {
-            "stay_id": stay_id,
-            "n_obs_rows": len(gw_obs),
+            "stay_id": stay_id
         }
 
         # ----- Creatinine features (ONLY from observation window) -----
@@ -151,7 +146,7 @@ def feature_engineering(df, observation_hours=6, label_col="aki_label"):
     if stays_skipped > 0:
         print(f"[Info] Skipped {stays_skipped} stays with insufficient observation data")
 
-    return X, y, groups
+    return X, y
 
 
 # ============================================================
@@ -159,20 +154,20 @@ def feature_engineering(df, observation_hours=6, label_col="aki_label"):
 # ============================================================
 def process_single_stay(stay_id, df, observation_hours, label_col):
     g = df[df["stay_id"] == stay_id]
-    X_one, y_one, group_one = feature_engineering(
+    X_one, y_one = feature_engineering(
         g, observation_hours=observation_hours, label_col=label_col
     )
 
     if X_one.empty:
         return None
-    X_one["stay_id"] = stay_id
+    # Note: stay_id is not added to features to prevent data leakage
 
     y_one = pd.Series(y_one, name=label_col)
 
-    return X_one, y_one, group_one
+    return X_one, y_one
 
 
-def parallel_feature_engineering(df, observation_hours=6, label_col="aki_label", n_jobs=4):
+def parallel_feature_engineering(df, observation_hours=6, label_col="aki_label", n_jobs=6):
     stay_groups = [(stay_id, g.copy()) for stay_id, g in df.groupby("stay_id")]
 
     # Use joblib for better multiprocessing support
@@ -184,9 +179,13 @@ def parallel_feature_engineering(df, observation_hours=6, label_col="aki_label",
     results = [r for r in results if r is not None]
     X_all = pd.concat([r[0] for r in results], ignore_index=True)
     y_all = pd.concat([r[1] for r in results], ignore_index=True)
-    # groups_all = pd.concat([r[2] for r in results], ignore_index=True)
 
-    return X_all, y_all  # , groups_all
+    # CRITICAL: Remove stay_id from features to prevent data leakage
+    if "stay_id" in X_all.columns:
+        X_all = X_all.drop(columns=["stay_id"])
+        print(f"[Info] Removed stay_id from features to prevent data leakage")
+
+    return X_all, y_all
 
 
 # ============================================================
@@ -212,10 +211,10 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
 
     # Feature engineering (happens AFTER split, using only observation window)
     print("[3/4] Extracting features from observation window...")
-    X_train, y_train, groups_train = feature_engineering(
+    X_train, y_train = feature_engineering(
         train_df, observation_hours, label_col
     )
-    X_test, y_test, groups_test = feature_engineering(
+    X_test, y_test = feature_engineering(
         test_df, observation_hours, label_col
     )
 
@@ -228,7 +227,7 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
         model = RandomForestClassifier(random_state=random_state)
         param_grid = {'model__max_depth': [5, 10, 20]}
     elif model_type == 'lr':
-        model = LogisticRegression(max_iter=1000, solver='liblinear', random_state=random_state)
+        model = LogisticRegression(max_iter=LR_MAX_ITER, solver='liblinear', random_state=random_state)
         param_grid = {'model__C': [0.01, 0.1, 1, 10]}
     else:
         raise ValueError(f"Model {model_type} not supported")
@@ -251,7 +250,7 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
         param_grid=param_grid,
         cv=inner_cv,
         scoring='f1',
-        n_jobs=4,
+        n_jobs=6,
         verbose=0
     )
 
@@ -289,14 +288,15 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
     del X_train, y_train, X_test, y_test
     gc.collect()
 
-    return results
+    return results, grid.best_estimator_, grid.best_params_
 
 
 # ============================================================
 # 4️⃣ Nested CV Runner
 # ============================================================
-def run_nested_cv_with_gridsearch(df_raw, model_type, outer_splits=10, inner_splits=3,
-                                  random_state=42, observation_hours=6, label_col="aki_label"):
+def run_nested_cv_with_grid_search(df_raw, model_type, outer_splits=10, inner_splits=3,
+                                   random_state=42, observation_hours=6, label_col="aki_label",
+                                   save_model=True, output_dir="../results"):
     """
     Nested CV with proper temporal boundaries and no data leakage.
     Uses the updated process_fold function for cleaner modularity.
@@ -313,9 +313,8 @@ def run_nested_cv_with_gridsearch(df_raw, model_type, outer_splits=10, inner_spl
 
     print(f"[2/4] Starting Nested CV with {outer_splits} folds...")
 
-    # Use threading backend to avoid pickle issues
     with tqdm_joblib(tqdm(desc="Outer Folds Progress", total=len(folds))):
-        all_results = Parallel(n_jobs=4, backend="threading")(
+        fold_results = Parallel(n_jobs=6, backend="threading")(
             delayed(process_fold)(
                 df_raw, train_stays, test_stays, fold_idx,
                 model_type, inner_splits, random_state, observation_hours, label_col
@@ -323,8 +322,38 @@ def run_nested_cv_with_gridsearch(df_raw, model_type, outer_splits=10, inner_spl
             for fold_idx, train_stays, test_stays in folds
         )
 
-    # Filter out None results (failed folds)
-    all_results = [r for r in all_results if r is not None]
+    # Separate results and best parameters
+    all_results = []
+    all_best_params = []
+
+    for fold_result in fold_results:
+        if fold_result is not None:
+            results, best_estimator, best_params = fold_result
+            all_results.append(results)
+            all_best_params.append(best_params)
+
+    # Analyze best parameters across folds
+    print("\n" + "="*60)
+    print("HYPERPARAMETER ANALYSIS")
+    print("="*60)
+
+    # Count parameter frequency
+    param_counts = {}
+    for params in all_best_params:
+        for param_name, param_value in params.items():
+            if param_name not in param_counts:
+                param_counts[param_name] = {}
+            if param_value not in param_counts[param_name]:
+                param_counts[param_name][param_value] = 0
+            param_counts[param_name][param_value] += 1
+
+    # Find most frequent parameters
+    most_frequent_params = {}
+    for param_name, value_counts in param_counts.items():
+        most_frequent_value = max(value_counts.items(), key=lambda x: x[1])
+        most_frequent_params[param_name] = most_frequent_value[0]
+        print(f"{param_name}: {most_frequent_value[0]} "
+              f"(selected {most_frequent_value[1]}/{len(all_best_params)} times)")
 
     print("\n" + "="*60)
     print("FINAL RESULTS (All Folds)")
@@ -336,11 +365,47 @@ def run_nested_cv_with_gridsearch(df_raw, model_type, outer_splits=10, inner_spl
         std_val = results_df[metric].std()
         print(f"{metric.upper()}: {mean_val:.3f} ± {std_val:.3f}")
 
-    return results_df
+    # Save best parameters for SHAP analysis if requested
+    saved_params_path = None
+    if save_model:
+        saved_params_path = save_best_parameters(
+            model_type, most_frequent_params, output_dir
+        )
+
+    return results_df, saved_params_path
 
 
 # ============================================================
-# 5️⃣ Main entry
+# 5️⃣ Model Saving Function
+# ============================================================
+def save_best_parameters(model_type, most_frequent_params, output_dir="../results"):
+    """Save best parameters from nested CV for SHAP analysis."""
+    print(f"\n{'='*60}")
+    print(f"Saving best parameters for {model_type.upper()} model")
+    print(f"{'='*60}")
+
+    # Create parameters info
+    params_info = {
+        'model_type': model_type,
+        'best_parameters': most_frequent_params,
+        'timestamp': pd.Timestamp.now().isoformat()
+    }
+
+    # Save parameters as JSON
+    os.makedirs(output_dir, exist_ok=True)
+    params_path = os.path.join(output_dir, f"{model_type}_best_params.json")
+
+    with open(params_path, 'w') as f:
+        json.dump(params_info, f, indent=2)
+
+    print(f"Best parameters saved to: {params_path}")
+    print(f"Parameters: {most_frequent_params}")
+
+    return params_path
+
+
+# ============================================================
+# 6️⃣ Main entry
 # ============================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Nested CV AKI Prediction Pipeline")
@@ -354,15 +419,20 @@ if __name__ == "__main__":
 
     # Run both models
     all_results = []
+    saved_params = []
 
     for model_type in ["lr", "rf"]:
         print(f"\n{'='*80}")
         print(f"Running {model_type.upper()} Model")
         print(f"{'='*80}")
 
-        results_df = run_nested_cv_with_gridsearch(df, model_type)
+        results_df, params_path = run_nested_cv_with_grid_search(df, model_type)
         results_df["model"] = model_type  # Add model type column
         all_results.append(results_df)
+
+        # Collect saved parameters path
+        if params_path:
+            saved_params.append(params_path)
 
     # Combine results from both models
     combined_results = pd.concat(all_results, ignore_index=True)
@@ -374,6 +444,13 @@ if __name__ == "__main__":
 
     print(f"\n============== Saved results to {result_file} ==============")
     print(f"Total folds: {len(combined_results)} ({len(combined_results[combined_results['model']=='lr'])} LR + {len(combined_results[combined_results['model']=='rf'])} RF)")  # noqa: E501
+
+    if saved_params:
+        print("\n============== Saved best parameters for SHAP analysis ==============")
+        for params_path in saved_params:
+            print(f"Parameters saved: {params_path}")
+        print("\nTo run SHAP analysis, use:")
+        print("python src/shap_analysis.py -i", args.data)
 
     # Print summary by model
     print("\n" + "-"*60)
