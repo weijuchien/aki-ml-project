@@ -183,7 +183,7 @@ def parallel_feature_engineering(df, observation_hours=6, label_col="aki_label",
     # CRITICAL: Remove stay_id from features to prevent data leakage
     if "stay_id" in X_all.columns:
         X_all = X_all.drop(columns=["stay_id"])
-        print(f"[Info] Removed stay_id from features to prevent data leakage")
+        print("[Info] Removed stay_id from features to prevent data leakage")
 
     return X_all, y_all
 
@@ -195,11 +195,6 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
                  inner_splits=3, random_state=42, observation_hours=6, label_col='aki_label'):
     """
     Process a single fold with proper temporal boundaries and no data leakage.
-
-    Key changes:
-    1. Filter dataframe by stays (not by rows)
-    2. Feature engineering happens AFTER split, using only observation window
-    3. Imputation happens WITHIN each fold
     """
     print(f"\n{'='*60}")
     print(f"Processing Fold {fold_idx + 1}")
