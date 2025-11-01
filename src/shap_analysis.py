@@ -30,7 +30,7 @@ MODEL_NAMES = {'lr': 'Logistic Regression', 'rf': 'Random Forest'}
 
 
 # ============================================================
-# 1️⃣ Data Loading and Model Loading
+# 1. Data Loading and Model Loading
 # ============================================================
 def load_best_parameters(params_path):
     """Load best parameters from pipeline results."""
@@ -109,7 +109,7 @@ def prepare_data_for_shap(df, test_size=0.2, random_state=42):
 
 
 # ============================================================
-# 2️⃣ SHAP Analysis Functions
+# 2. SHAP Analysis Functions
 # ============================================================
 def calculate_shap_values(pipeline, X_train, X_test, model_type):
     """Calculate SHAP values for the model."""
@@ -180,7 +180,7 @@ def create_feature_importance_plot(shap_values, feature_names, model_name, save_
     plt.barh(range(len(importance_df)), importance_df['importance'])
     plt.yticks(range(len(importance_df)), importance_df['feature'])
     plt.xlabel('Mean |SHAP value|')
-    plt.title(f'Feature Importance - {model_name}')
+    # plt.title(f'Feature Importance - {model_name}')
     plt.tight_layout()
 
     if save_path:
@@ -311,7 +311,7 @@ def create_shap_waterfall_plot(explainer, X_test_sample, feature_names, model_na
 
 
 # ============================================================
-# 3️⃣ Main SHAP Analysis Function
+# 3. Main SHAP Analysis Function
 # ============================================================
 def run_shap_analysis(csv_path, params_paths, output_dir=None):
     """
@@ -366,16 +366,16 @@ def run_shap_analysis(csv_path, params_paths, output_dir=None):
         )
 
         # SHAP summary plot
-        create_shap_summary_plot(
-            shap_values, X_test_transformed, X_test.columns, MODEL_NAMES[model_type],
-            model_output_dir / "shap_summary.png"
-        )
+        # create_shap_summary_plot(
+        #     shap_values, X_test_transformed, X_test.columns, MODEL_NAMES[model_type],
+        #     model_output_dir / "shap_summary.png"
+        # )
 
         # SHAP waterfall plot
-        create_shap_waterfall_plot(
-            explainer, X_test_transformed, X_test.columns, MODEL_NAMES[model_type],
-            model_output_dir / "shap_waterfall.png"
-        )
+        # create_shap_waterfall_plot(
+        #     explainer, X_test_transformed, X_test.columns, MODEL_NAMES[model_type],
+        #     model_output_dir / "shap_waterfall.png"
+        # )
         exit(0)
         # Save feature importance results
         importance_df['model'] = model_type
@@ -393,7 +393,7 @@ def run_shap_analysis(csv_path, params_paths, output_dir=None):
 
 
 # ============================================================
-# 4️⃣ Main Entry Point
+# 4. Main Entry Point
 # ============================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SHAP Analysis for AKI Prediction Models")

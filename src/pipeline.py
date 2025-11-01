@@ -29,7 +29,7 @@ LR_MAX_ITER = 1000
 
 
 # ============================================================
-# 1️⃣ Feature Engineering
+# 1. Feature Engineering
 # ============================================================
 def feature_engineering(df, observation_hours=6, label_col="aki_label"):
     """
@@ -150,7 +150,7 @@ def feature_engineering(df, observation_hours=6, label_col="aki_label"):
 
 
 # ============================================================
-# 2️⃣ Parallelized feature extraction
+# 2. Parallelized feature extraction
 # ============================================================
 def process_single_stay(stay_id, df, observation_hours, label_col):
     g = df[df["stay_id"] == stay_id]
@@ -189,7 +189,7 @@ def parallel_feature_engineering(df, observation_hours=6, label_col="aki_label",
 
 
 # ============================================================
-# 3️⃣ Cross-validation pipeline
+# 3. Cross-validation pipeline
 # ============================================================
 def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
                  inner_splits=3, random_state=42, observation_hours=6, label_col='aki_label'):
@@ -287,7 +287,7 @@ def process_fold(df_raw, train_stays, test_stays, fold_idx, model_type,
 
 
 # ============================================================
-# 4️⃣ Nested CV Runner
+# 4. Nested CV Runner
 # ============================================================
 def run_nested_cv_with_grid_search(df_raw, model_type, outer_splits=10, inner_splits=3,
                                    random_state=42, observation_hours=6, label_col="aki_label",
@@ -371,7 +371,7 @@ def run_nested_cv_with_grid_search(df_raw, model_type, outer_splits=10, inner_sp
 
 
 # ============================================================
-# 5️⃣ Model Saving Function
+# 5. Model Saving Function
 # ============================================================
 def save_best_parameters(model_type, most_frequent_params, output_dir="../results"):
     """Save best parameters from nested CV for SHAP analysis."""
@@ -400,7 +400,7 @@ def save_best_parameters(model_type, most_frequent_params, output_dir="../result
 
 
 # ============================================================
-# 6️⃣ Main entry
+# 6. Main entry
 # ============================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Nested CV AKI Prediction Pipeline")

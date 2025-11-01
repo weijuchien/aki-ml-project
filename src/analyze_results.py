@@ -21,7 +21,7 @@ MODEL_NAMES = {'lr': 'Logistic Regression', 'rf': 'Random Forest'}
 
 
 # ============================================================
-# 1️⃣ Statistical Analysis Functions
+# 1. Statistical Analysis Functions
 # ============================================================
 def load_results(csv_path):
     if not os.path.exists(csv_path):
@@ -157,13 +157,13 @@ def perform_statistical_tests(df):
 
 
 # ============================================================
-# 2️⃣ Visualization Functions
+# 2. Visualization Functions
 # ============================================================
 def create_metric_comparison_plot(df, save_path=None):
     """Create box plots comparing metrics between models."""
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle('Model Performance Comparison Across Metrics',
-                 fontsize=16, fontweight='bold')
+    # fig.suptitle('Model Performance Comparison Across Metrics',
+    #              fontsize=16, fontweight='bold')
 
     axes = axes.flatten()
 
@@ -242,7 +242,7 @@ def create_performance_heatmap(df, save_path=None):
         plt.figure(figsize=(10, 6))
         sns.heatmap(heatmap_df, annot=True, fmt='.3f', cmap='RdYlBu_r',
                     cbar_kws={'label': 'Score (Note: Lower Brier Score = Better)'})
-        plt.title('Model Performance Heatmap', fontsize=14, fontweight='bold')
+        # plt.title('Model Performance Heatmap', fontsize=14, fontweight='bold')
         plt.xlabel('Metrics')
         plt.ylabel('Models')
 
@@ -255,8 +255,14 @@ def create_performance_heatmap(df, save_path=None):
 
 def create_fold_progression_plot(df, save_path=None):
     """Create line plots showing performance across folds."""
+    # Define color mapping to match metric_comparison.png
+    model_colors = {
+        'lr': 'lightblue',      # Light blue for Logistic Regression
+        'rf': 'lightcoral'       # Light coral for Random Forest
+    }
+
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle('Performance Across Folds', fontsize=16, fontweight='bold')
+    # fig.suptitle('Performance Across Folds', fontsize=16, fontweight='bold')
 
     axes = axes.flatten()
 
@@ -269,8 +275,10 @@ def create_fold_progression_plot(df, save_path=None):
         for model in MODEL_TYPES:
             model_data = df[df['model'] == model].sort_values('fold')
             if not model_data.empty:
+                color = model_colors.get(model, 'gray')
                 ax.plot(model_data['fold'], model_data[metric],
-                        marker='o', linewidth=2, label=MODEL_NAMES[model])
+                        marker='o', linewidth=2, color=color,
+                        label=MODEL_NAMES[model], markersize=6)
 
         ax.set_title(f'{metric.upper()}', fontweight='bold')
         ax.set_xlabel('Fold')
@@ -309,7 +317,7 @@ def create_correlation_matrix(df, save_path=None):
 
 
 # ============================================================
-# 3️⃣ Main Analysis Function
+# 3. Main Analysis Function
 # ============================================================
 def run_complete_analysis(csv_path, output_dir=None):
     """Run complete analysis including statistics and visualizations."""
@@ -345,7 +353,7 @@ def run_complete_analysis(csv_path, output_dir=None):
     create_metric_comparison_plot(df, output_dir / "metric_comparison.png")
     create_performance_heatmap(df, output_dir / "performance_heatmap.png")
     create_fold_progression_plot(df, output_dir / "fold_progression.png")
-    create_correlation_matrix(df, output_dir / "correlation_matrix.png")
+    # create_correlation_matrix(df, output_dir / "correlation_matrix.png")
 
     print(f"\nAnalysis complete! Results saved to: {output_dir}")
 
@@ -353,7 +361,7 @@ def run_complete_analysis(csv_path, output_dir=None):
 
 
 # ============================================================
-# 4️⃣ Main Entry Point
+# 4. Main Entry Point
 # ============================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze AKI Prediction Results")
